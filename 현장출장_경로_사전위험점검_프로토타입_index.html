@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>현장출장 경로 사전 위험점검 - Prototype</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#172033;--muted:#667085;--line:#e4e7ec;--good:#15803d;--warn:#b45309;--bad:#b42318;--brand:#1d4ed8}
+*{box-sizing:border-box} body{margin:0;font-family:Arial,"Noto Sans KR",sans-serif;background:var(--bg);color:var(--text)}
+.wrap{max-width:1080px;margin:28px auto;padding:0 18px}.hero{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;margin-bottom:18px}
+h1{font-size:28px;margin:0 0 6px}.sub{color:var(--muted);font-size:14px}.badge{font-size:12px;background:#eef4ff;color:#1849a9;border:1px solid #c7d7fe;padding:7px 10px;border-radius:999px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px;box-shadow:0 2px 8px rgba(16,24,40,.04)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}input,select{width:100%;padding:12px;border:1px solid #d0d5dd;border-radius:10px;font-size:14px;background:#fff}
+button{border:0;background:var(--brand);color:#fff;padding:13px 18px;border-radius:10px;font-weight:700;cursor:pointer}
+button.secondary{background:#344054}.actions{display:flex;gap:8px;align-items:end}.full{width:100%}
+.settings summary{cursor:pointer;font-weight:700}.hint{font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px}
+.status{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.stat{border:1px solid var(--line);border-radius:12px;padding:14px}
+.stat .name{font-size:12px;color:var(--muted)}.stat .value{font-size:20px;font-weight:800;margin-top:5px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+.result-title{display:flex;justify-content:space-between;align-items:center}.grade{font-size:22px;font-weight:900;padding:8px 12px;border-radius:10px;background:#fff7ed;color:#9a3412}
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:#475467;background:#f9fafb}
+.log{font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;background:#101828;color:#d0d5dd;padding:12px;border-radius:10px;max-height:180px;overflow:auto}
+.hidden{display:none}.pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:700;background:#f2f4f7;color:#344054}
+@media(max-width:760px){.grid,.grid3,.status{grid-template-columns:1fr}.hero{display:block}.badge{display:inline-block;margin-top:8px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <div><h1>현장출장 경로 사전 위험점검</h1><div class="sub">출장지 주소만 입력해 경로·기상·사고위험·실시간 교통상황을 한 화면에서 확인</div></div>
+    <div class="badge">v0.7</div>
+  </div>
+
+  <details class="card settings">
+    <summary>① API 키 설정 (최초 1회)</summary>
+    <div class="grid" style="margin-top:14px;grid-template-columns:1fr 1fr 1fr">
+      <div><label>카카오 REST API Key</label><input id="kakaoKey" type="password" placeholder="Kakao Developers REST API Key"></div>
+      <div><label>공공데이터포털 Service Key</label><input id="dataKey" type="password" placeholder="공공데이터포털 인증키"></div>
+      <div><label>ITS 인증키 <span class="pill">추후 연결</span></label><input id="itsKey" type="password" placeholder="국가교통정보센터 인증키"></div>
+    </div>
+    <div class="hint" style="margin-top:8px">사고위험 데이터 연도는 현재연도부터 역순으로 조회해 <b>실제로 제공되는 최신연도</b>를 자동 선택합니다.</div>
+    <div class="hint">카카오 키와 공공데이터포털 키는 현재 기능에 사용됩니다. ITS 인증키는 발급 후 현재 사고·공사·통제 상세 기능에 연결할 예정입니다. 최초 1회 입력하면 이 PC 브라우저(localStorage)에 계속 저장됩니다. 배포용 서비스에서는 API 키를 브라우저에 노출하지 말고 서버에서 호출해야 합니다.</div>
+    <button class="secondary" style="margin-top:10px" onclick="saveKeys()">키 저장</button>
+  </details>
+
+  <div class="card">
+    <div class="grid3">
+      <div><label>출발지</label><input id="origin" value="경상남도 진주시 칠암동 414-4" readonly></div>
+      <div><label>경유지 (선택)</label><input id="waypoint" placeholder="예: 산청읍 산청리 1"></div>
+      <div><label>출장지</label><input id="destination" placeholder="예: 상림리 64-1"></div>
+    </div>
+    <div style="margin-top:10px"><button class="full" onclick="runCheck()">위험점검 실행</button></div>
+    <div class="hint">출장지·경유지는 <b>상림리 64-1</b>처럼 짧게 입력해도 됩니다. 카카오 주소/키워드검색을 함께 사용하고 <b>경상남도 결과를 우선</b> 반영합니다. 출발지는 경상남도 진주시 칠암동 414-4로 고정했습니다.</div>
+  </div>
+
+  <div id="loading" class="card hidden">데이터 확인 중...</div>
+
+  <div id="result" class="hidden">
+    <div class="card">
+      <div class="result-title"><div><b>종합 결과</b><div id="routeText" class="sub" style="margin-top:5px"></div></div><div id="grade" class="grade">-</div></div>
+      <div class="status" style="margin-top:14px">
+        <div class="stat"><div class="name">예상 이동거리</div><div id="distance" class="value">-</div></div>
+        <div class="stat"><div class="name">예상 소요시간</div><div id="duration" class="value">-</div></div>
+        <div class="stat"><div class="name">사고위험지역</div><div id="riskCount" class="value">-</div></div>
+        <div class="stat"><div class="name">기상위험</div><div id="weatherRisk" class="value">-</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <b>자동 점검 항목</b>
+      <table><thead><tr><th>항목</th><th>판정</th><th>근거</th></tr></thead><tbody id="checks"></tbody></table>
+    </div>
+
+    <div class="card">
+      <b>종합판정 상세</b>
+      <div id="gradeExplain" style="margin-top:10px;line-height:1.7"></div>
+    </div>
+
+    <div class="card">
+      <b>현재 사고·공사·통제</b>
+      <div class="hint">현재는 카카오모빌리티 길찾기의 유고정보를 경로에 반영합니다. ITS 인증키 발급 후에는 현재 사고·공사·통제의 위치·시간·차로통제 정보를 이 영역에 우선 표시하도록 확장할 예정입니다.</div>
+      <table><thead><tr><th>구분</th><th>위치/도로</th><th>상세</th></tr></thead><tbody id="eventRows"></tbody></table>
+    </div>
+
+    <div class="card">
+      <b>경로 주변 사고위험지역</b>
+      <div class="hint">경로가 지나는 행정구역을 샘플링하여 도로교통공단 링크기반 교통사고 위험지역을 조회합니다. 데이터 연도는 현재연도부터 역순으로 자동 확인해 <b>실제로 제공되는 최신연도</b>를 사용합니다.</div>
+      <table><thead><tr><th>위험지역</th><th>사고</th><th>사망/중상</th><th>원인유형</th></tr></thead><tbody id="riskRows"></tbody></table>
+    </div>
+
+    <div class="card">
+      <b>목적지 시간대 기상</b>
+      <div id="weatherMeta" class="hint" style="margin-top:6px"></div>
+      <table><thead><tr><th>예보 대상시각</th><th>강수확률</th><th>강수형태</th><th>기온</th><th>풍속</th></tr></thead><tbody id="weatherRows"></tbody></table>
+    </div>
+  </div>
+
+  <details class="card">
+    <summary>개발 로그</summary><div id="log" class="log">대기 중</div>
+  </details>
+
+  <div class="card" style="font-size:12px;color:#667085">
+    <b>데이터 기준</b><br>
+    • 경로: 카카오모빌리티 자동차 길찾기<br>
+    • 기상: 기상청 단기예보<br>
+    • 사고위험: 도로교통공단 링크기반 교통사고 위험지역<br>
+    • 현재 사고·공사·통제 상세: ITS 인증키 발급 후 추가 연계 예정
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+function normalizeServiceKey(k){
+  let s=(k||'').trim();
+  // 공공데이터포털의 Encoding/Decoding 키 어느 쪽을 붙여넣어도 동작하도록 정규화
+  if(/%[0-9A-Fa-f]{2}/.test(s)){
+    try{s=decodeURIComponent(s);}catch(e){}
+  }
+  return s;
+}
+function keyParam(k){ return encodeURIComponent(normalizeServiceKey(k)); }
+function log(s){ $('log').textContent += "\\n"+s; $('log').scrollTop=$('log').scrollHeight; }
+function saveKeys(){ localStorage.kakaoKey=$('kakaoKey').value.trim(); localStorage.dataKey=$('dataKey').value.trim(); localStorage.itsKey=$('itsKey').value.trim(); alert('이 PC 브라우저에 저장했습니다.'); }
+(function(){ $('kakaoKey').value=localStorage.kakaoKey||''; $('dataKey').value=localStorage.dataKey||''; $('itsKey').value=localStorage.itsKey||''; })();
+
+async function jfetch(url, opt={}){
+  const r=await fetch(url,opt);
+  const raw=await r.text();
+  if(!r.ok){
+    let detail=raw.replace(/\s+/g,' ').trim();
+    if(detail.length>500) detail=detail.slice(0,500)+'...';
+    throw new Error(`${r.status} ${r.statusText}${detail ? ' / 응답: '+detail : ''}`);
+  }
+  try{return JSON.parse(raw);}
+  catch(e){
+    throw new Error('JSON 파싱 실패 / 응답: '+raw.slice(0,500));
+  }
+}
+function addressCandidates(addr){
+  const a=addr.trim().replace(/\s+/g,' ');
+  const out=[a];
+  if(!/(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|특별시|광역시|특별자치)/.test(a)){
+    out.push('경상남도 '+a);
+  }
+  return [...new Set(out)];
+}
+async function kakaoAddressSearch(q,key){
+  const u='https://dapi.kakao.com/v2/local/search/address.json?query='+encodeURIComponent(q);
+  return await jfetch(u,{headers:{Authorization:'KakaoAK '+key}});
+}
+async function kakaoKeywordSearch(q,key){
+  const u='https://dapi.kakao.com/v2/local/search/keyword.json?size=15&query='+encodeURIComponent(q);
+  return await jfetch(u,{headers:{Authorization:'KakaoAK '+key}});
+}
+function chooseKakaoResult(docs){
+  if(!docs?.length) return null;
+  const isGyeongnam=d=>{
+    const a=(d.address_name||'')+' '+(d.road_address_name||'');
+    return a.includes('경남 ')||a.includes('경상남도 ');
+  };
+  return docs.find(isGyeongnam)||docs[0];
+}
+async function geocode(addr,key){
+  const raw=addr.trim().replace(/\s+/g,' ');
+  const tried=[];
+  for(const q of addressCandidates(raw)){
+    tried.push(q);
+    try{
+      const j=await kakaoAddressSearch(q,key);
+      if(j.documents?.length){
+        const d=j.documents[0], full=d.road_address?.address_name||d.address?.address_name||q;
+        return {x:+d.x,y:+d.y,display:full,matched:full,method:'주소검색'};
+      }
+    }catch(e){ log('주소검색 실패('+q+'): '+e.message); }
+  }
+  for(const q of [raw,'경상남도 '+raw]){
+    tried.push('키워드:'+q);
+    try{
+      const j=await kakaoKeywordSearch(q,key), d=chooseKakaoResult(j.documents);
+      if(d){
+        const full=d.road_address_name||d.address_name||d.place_name||q;
+        return {x:+d.x,y:+d.y,display:full,matched:full,method:'자동주소검색'};
+      }
+    }catch(e){ log('키워드검색 실패('+q+'): '+e.message); }
+  }
+  throw new Error('주소를 찾지 못했습니다: '+raw+'\\n조금 더 구체적인 지번·도로명·건물명을 입력해 주세요.');
+}
+async function regionCode(x,y,key){
+  const u=`https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x=${x}&y=${y}`;
+  const j=await jfetch(u,{headers:{Authorization:'KakaoAK '+key}});
+  const d=j.documents.find(v=>v.region_type==='B')||j.documents[0];
+  return {code:d.code, name:d.address_name, sido:d.code.slice(0,2), gugun:d.code.slice(2,5)};
+}
+async function route(o,d,key,wp=null){
+  let u=`https://apis-navi.kakaomobility.com/v1/directions?origin=${o.x},${o.y}&destination=${d.x},${d.y}&priority=RECOMMEND&roadevent=0&road_details=true&summary=false`;
+  if(wp) u += `&waypoints=${wp.x},${wp.y}`;
+  // 지원되는 환경에서는 상세 유고정보도 요청. 미지원 시 기본 경로는 그대로 작동.
+  u += `&road_details_extra_info=roadevent`;
+  const j=await jfetch(u,{headers:{Authorization:'KakaoAK '+key,'Content-Type':'application/json'}});
+  if(!j.routes?.length || j.routes[0].result_code!==0) throw new Error(j.routes?.[0]?.result_msg||'경로 조회 실패');
+  return j.routes[0];
+}
+function routePoints(rt){
+  const pts=[];
+  for(const sec of rt.sections||[]) for(const road of sec.roads||[]){
+    const v=road.vertexes||[]; for(let i=0;i<v.length;i+=2) pts.push({x:+v[i],y:+v[i+1]});
+  }
+  return pts;
+}
+function extractRoadEvents(obj){
+  const found=[];
+  const seen=new Set();
+  function walk(x,path=''){
+    if(!x||typeof x!=='object') return;
+    if(Array.isArray(x)){ x.forEach((v,i)=>walk(v,path+'['+i+']')); return; }
+    const keys=Object.keys(x);
+    const joined=keys.join('|').toLowerCase();
+    if(/road.?event|incident|accident|construction|closure|block/.test(joined)){
+      const raw=JSON.stringify(x);
+      if(raw.length<5000){
+        const sig=raw.slice(0,800);
+        if(!seen.has(sig)){seen.add(sig);found.push(x);}
+      }
+    }
+    keys.forEach(k=>walk(x[k],path+'.'+k));
+  }
+  walk(obj);
+  return found.slice(0,20);
+}
+function eventSummary(ev){
+  const pairs=[];
+  const pick=(names)=>{
+    for(const n of names) if(ev[n]!=null && ev[n]!=='') return ev[n];
+    return '';
+  };
+  const type=pick(['type','event_type','road_event_type','category','kind'])||'유고정보';
+  const road=pick(['road_name','roadName','name','location','address'])||'-';
+  const detail=pick(['description','message','detail','content','guidance','event_name'])||'경로 계산에 유고정보 반영';
+  return {type:String(type),road:String(road),detail:String(detail)};
+}
+
+function sample(arr,n=8){ if(arr.length<=n)return arr; return [...Array(n)].map((_,i)=>arr[Math.floor(i*(arr.length-1)/(n-1))]); }
+function hav(a,b){ const R=6371000,p=Math.PI/180,d1=(b.y-a.y)*p,d2=(b.x-a.x)*p;
+  const q=Math.sin(d1/2)**2+Math.cos(a.y*p)*Math.cos(b.y*p)*Math.sin(d2/2)**2; return 2*R*Math.asin(Math.sqrt(q)); }
+
+async function riskAreas(region, year, dataKey){
+  const u=`https://apis.data.go.kr/B552061/accidentRiskArea/getRestAccidentRiskArea?ServiceKey=${keyParam(dataKey)}&searchYearCd=${year}&siDo=${region.sido}&guGun=${region.gugun}&type=json&numOfRows=100&pageNo=1`;
+  const j=await jfetch(u);
+  const items=j.response?.body?.items?.item || j.items?.item || [];
+  return Array.isArray(items)?items:(items?[items]:[]);
+}
+
+// EPSG:5179 -> WGS84 근사 변환은 외부 proj4 없이 어려워, 중심좌표 거리필터 대신
+// "경로가 지나가는 법정 시군구" 단위 위험지역을 수집한다. 화면에 이 한계를 명확히 표시.
+async function collectRisks(pts,key,dataKey){
+  const regs=new Map();
+  for(const p of sample(pts,7)){
+    try{ const r=await regionCode(p.x,p.y,key); regs.set(r.sido+r.gugun,r); }
+    catch(e){ log('행정구역 샘플 실패 '+e.message); }
+  }
+  const years=[];
+  const y0=new Date().getFullYear();
+  for(let y=y0;y>=y0-6;y--) years.push(String(y));
+
+  for(const year of years){
+    const all=[]; let ok=0;
+    log('사고위험 데이터 연도 확인: '+year);
+    for(const r of regs.values()){
+      try{
+        const x=await riskAreas(r,year,dataKey); ok++;
+        x.forEach(v=>all.push({...v,_region:r.name,_year:year}));
+      }catch(e){ log(`사고위험 API ${year} ${r.name} 실패: `+e.message); }
+    }
+    if(ok>0 && all.length>0){
+      log('사고위험 최신 제공연도 선택: '+year);
+      return {regions:[...regs.values()],items:all,year};
+    }
+  }
+  return {regions:[...regs.values()],items:[],year:'확인불가'};
+}
+
+// 기상청 Lambert Conformal Conic 변환
+function toGrid(lat,lon){
+  const RE=6371.00877,GRID=5.0,SLAT1=30,SLAT2=60,OLON=126,OLAT=38,XO=43,YO=136,DEGRAD=Math.PI/180;
+  const re=RE/GRID, sl1=SLAT1*DEGRAD, sl2=SLAT2*DEGRAD, olon=OLON*DEGRAD, olat=OLAT*DEGRAD;
+  let sn=Math.tan(Math.PI*.25+sl2*.5)/Math.tan(Math.PI*.25+sl1*.5); sn=Math.log(Math.cos(sl1)/Math.cos(sl2))/Math.log(sn);
+  let sf=Math.tan(Math.PI*.25+sl1*.5); sf=Math.pow(sf,sn)*Math.cos(sl1)/sn;
+  let ro=Math.tan(Math.PI*.25+olat*.5); ro=re*sf/Math.pow(ro,sn);
+  let ra=Math.tan(Math.PI*.25+lat*DEGRAD*.5); ra=re*sf/Math.pow(ra,sn);
+  let th=lon*DEGRAD-olon; if(th>Math.PI)th-=2*Math.PI;if(th<-Math.PI)th+=2*Math.PI; th*=sn;
+  return {nx:Math.floor(ra*Math.sin(th)+XO+0.5),ny:Math.floor(ro-ra*Math.cos(th)+YO+0.5)};
+}
+function kmaBase(){
+  const now=new Date(); now.setMinutes(now.getMinutes()-25);
+  const slots=[2,5,8,11,14,17,20,23]; let h=slots.filter(x=>x<=now.getHours()).pop();
+  if(h===undefined){ now.setDate(now.getDate()-1); h=23; }
+  const y=now.getFullYear(),m=String(now.getMonth()+1).padStart(2,'0'),d=String(now.getDate()).padStart(2,'0');
+  return {date:`${y}${m}${d}`,time:String(h).padStart(2,'0')+'00'};
+}
+async function weather(lat,lon,dataKey){
+  const g=toGrid(lat,lon), b=kmaBase();
+  const u=`https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst?serviceKey=${keyParam(dataKey)}&pageNo=1&numOfRows=1000&dataType=JSON&base_date=${b.date}&base_time=${b.time}&nx=${g.nx}&ny=${g.ny}`;
+  const j=await jfetch(u); const items=j.response?.body?.items?.item||[];
+  const by={}; for(const it of items){ const k=it.fcstDate+it.fcstTime; (by[k]??={date:it.fcstDate,time:it.fcstTime})[it.category]=it.fcstValue; }
+  return {rows:Object.values(by).slice(0,10), baseDate:b.date, baseTime:b.time, nx:g.nx, ny:g.ny};
+}
+function ptyName(v){ return ({'0':'없음','1':'비','2':'비/눈','3':'눈','4':'소나기'})[String(v)]||v||'-'; }
+function weatherScore(rows){
+  let score=0, reasons=[];
+  for(const r of rows.slice(0,6)){
+    const pop=+r.POP||0, wsd=+r.WSD||0, pty=String(r.PTY||'0');
+    if(pop>=70){score=Math.max(score,1);reasons.push('강수확률 70% 이상');}
+    if(pty==='3'||pty==='2'){score=Math.max(score,2);reasons.push('눈/비·눈 예보');}
+    if(wsd>=9){score=Math.max(score,2);reasons.push('강풍 수준 풍속');} else if(wsd>=5){score=Math.max(score,1);reasons.push('다소 강한 바람');}
+  }
+  return {score,reasons:[...new Set(reasons)]};
+}
+function fmtDate(s){return s?`${s.slice(4,6)}/${s.slice(6,8)} ${s.slice(0,2)}:${s.slice(2,4)}`:'-';}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+
+async function runCheck(){
+  const key=$('kakaoKey').value.trim(), dataKey=$('dataKey').value.trim();
+  if(!key||!dataKey){alert('카카오 REST API Key와 공공데이터포털 Service Key를 입력해 주세요.');return;}
+  if(!$('origin').value.trim()){alert('출발지 주소를 입력해 주세요.');return;} if(!$('destination').value.trim()){alert('출장지 주소를 입력해 주세요.');return;}
+  saveKeys(); $('loading').classList.remove('hidden'); $('result').classList.add('hidden'); $('log').textContent='점검 시작';
+  try{
+    const o=await geocode($('origin').value.trim(),key), d=await geocode($('destination').value.trim(),key);
+    const wpText=$('waypoint').value.trim();
+    const wp=wpText?await geocode(wpText,key):null;
+    log(`출발지 매칭: ${o.matched} [${o.method}]`);
+    if(wp) log(`경유지 매칭: ${wp.matched} [${wp.method}]`);
+    log(`출장지 매칭: ${d.matched} [${d.method}]`);
+    log(`좌표변환 완료`);
+    const rt=await route(o,d,key,wp), pts=routePoints(rt);
+    log(`경로 완료: ${(rt.summary.distance/1000).toFixed(1)} km / 경로점 ${pts.length}개`);
+    let risks={regions:[],items:[],error:null,year:'-'}, w={rows:[],baseDate:'',baseTime:''}, weatherErr=null;
+    const settled=await Promise.allSettled([
+      collectRisks(pts,key,dataKey),
+      weather(d.y,d.x,dataKey)
+    ]);
+    if(settled[0].status==='fulfilled') risks=settled[0].value;
+    else { risks.error=settled[0].reason?.message||String(settled[0].reason); log('사고위험 전체 조회 실패: '+risks.error); }
+    if(settled[1].status==='fulfilled') w=settled[1].value;
+    else { weatherErr=settled[1].reason?.message||String(settled[1].reason); log('기상 전체 조회 실패: '+weatherErr); }
+    const ws=weatherErr ? {score:0,reasons:[]} : weatherScore(w.rows||[]);
+    const severe=risks.items.filter(x=>(+x.tot_dth_dnv_cnt||0)>0 || (+x.tot_se_dnv_cnt||0)>=3).length;
+    let totalScore=0; if(risks.items.length) totalScore++; if(severe) totalScore++; totalScore+=ws.score;
+    const grade=totalScore>=3?['🔴 위험','bad']:totalScore>=1?['🟡 주의','warn']:['🟢 양호','good'];
+
+    $('routeText').textContent=(o.display||$('origin').value.trim())+(wp?' → '+wp.display:'')+' → '+(d.display||$('destination').value.trim());
+    $('distance').textContent=(rt.summary.distance/1000).toFixed(1)+' km';
+    $('duration').textContent=Math.round(rt.summary.duration/60)+'분';
+    $('riskCount').textContent=risks.error?'조회오류':(risks.items.length+'건 ('+risks.year+')'); $('riskCount').className='value '+(risks.error?'bad':risks.items.length?'warn':'good');
+    $('weatherRisk').textContent=weatherErr?'조회오류':(ws.score>=2?'높음':ws.score===1?'주의':'낮음'); $('weatherRisk').className='value '+(weatherErr?'bad':ws.score>=2?'bad':ws.score===1?'warn':'good');
+    $('grade').textContent=grade[0]; $('grade').className='grade '+grade[1];
+
+    const events=extractRoadEvents(rt);
+    const reasons=[];
+    if(severe) reasons.push(`사망사고 또는 중상사고 비중이 높은 사고위험 후보 ${severe}곳`);
+    else if(risks.items.length) reasons.push(`최신 제공연도(${risks.year}) 사고위험 후보 ${risks.items.length}곳`);
+    if(ws.score>=2) reasons.push('눈·강풍 등 기상 위험조건');
+    else if(ws.score===1) reasons.push(ws.reasons.join(', ')||'기상 주의조건');
+    if(events.length) reasons.push(`실시간 유고 상세 ${events.length}건 감지`);
+    if(!reasons.length) reasons.push('현재 조회 가능한 사고위험·기상·유고 조건에서 뚜렷한 위험요인 미검출');
+    const gradeText=grade[0].includes('위험')
+      ? '🔴 위험: 즉시 확인이 필요한 위험요인이 있습니다. 우회·시간조정 등 적극적인 조치를 검토하세요.'
+      : grade[0].includes('주의')
+      ? '🟡 주의: 평소보다 주의가 필요한 요인이 있습니다. 아래 근거를 확인하고 감속·안전거리 확보 등 예방조치를 적용하세요.'
+      : '🟢 양호: 현재 조회 가능한 데이터에서 특별한 위험요인이 확인되지 않았습니다. 일반 안전운전 기준은 계속 준수해야 합니다.';
+    $('gradeExplain').innerHTML=`<b>${gradeText}</b><br>${reasons.map(x=>'• '+esc(x)).join('<br>')}<br><span class="hint">※ “양호”는 위험이 전혀 없다는 뜻이 아니라, 현재 연결된 데이터에서 추가 위험신호가 확인되지 않았다는 의미입니다.</span>`;
+
+    $('eventRows').innerHTML=events.length
+      ? events.map(ev=>{const x=eventSummary(ev);return `<tr><td>${esc(x.type)}</td><td>${esc(x.road)}</td><td>${esc(x.detail)}</td></tr>`}).join('')
+      : '<tr><td>실시간 반영</td><td>전체 경로</td><td>카카오 길찾기에 교통사고·재난·도로공사 등으로 인한 <b>전체 차선 통제정보를 반영</b>했습니다. 현재 응답에서는 별도 상세 유고 목록이 제공되지 않았습니다.</td></tr>';
+
+    const checks=[
+      ['자동차 경로','완료',`추천경로 ${ (rt.summary.distance/1000).toFixed(1)}km · 도로 유고/전체차선 통제 반영 옵션 적용`,'good'],
+      ['사고위험지역',risks.error?'조회오류':(risks.items.length?`${risks.items.length}건 후보`:'특이사항 없음'),risks.error?risks.error:`최신 제공연도 ${risks.year} · ${risks.regions.map(r=>r.name).join(', ')} 내 링크기반 사고위험지역 조회`,risks.error?'bad':risks.items.length?'warn':'good'],
+      ['기상',weatherErr?'조회오류':(ws.score>=2?'위험':ws.score===1?'주의':'양호'),weatherErr?weatherErr:(ws.reasons.join(', ')||'향후 시간대 강수·강풍 특이조건 미검출'),weatherErr?'bad':ws.score>=2?'bad':ws.score===1?'warn':'good'],
+      ['현재 사고·공사·통제',events.length?`${events.length}건 상세`:'경로 반영',events.length?'카카오 경로 응답에서 유고 상세정보 감지':'교통사고·재난·도로공사 등 전체차선 통제정보를 경로 계산에 실시간 반영',events.length?'warn':'good']
+    ];
+    $('checks').innerHTML=checks.map(x=>`<tr><td>${x[0]}</td><td class="${x[3]}"><b>${x[1]}</b></td><td>${x[2]}</td></tr>`).join('');
+
+    const sorted=[...risks.items].sort((a,b)=>(+b.tot_dth_dnv_cnt*20 + +b.tot_se_dnv_cnt*5 + +b.tot_acc_cnt)-(+a.tot_dth_dnv_cnt*20 + +a.tot_se_dnv_cnt*5 + +a.tot_acc_cnt)).slice(0,15);
+    $('riskRows').innerHTML=risks.error?`<tr><td colspan="4" class="bad">${esc(risks.error)}</td></tr>`:(sorted.length?sorted.map(x=>`<tr><td>${esc(x.acc_risk_area_nm)} <span class="pill">${esc(x._year||risks.year)}</span></td><td>${esc(x.tot_acc_cnt)}건</td><td>${esc(x.tot_dth_dnv_cnt)}/${esc(x.tot_se_dnv_cnt)}</td><td>${esc(x.cause_anals_ty_nm)}</td></tr>`).join(''):'<tr><td colspan="4">조회된 위험지역 없음</td></tr>');
+    const now=new Date();
+    const nowTxt=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    $('weatherMeta').innerHTML=weatherErr
+      ? '<span class="bad">기상 조회 실패</span>'
+      : `조회시각: <b>${nowTxt}</b> · 기상청 발표기준: <b>${w.baseDate.slice(0,4)}-${w.baseDate.slice(4,6)}-${w.baseDate.slice(6,8)} ${w.baseTime.slice(0,2)}:${w.baseTime.slice(2,4)}</b>`;
+    $('weatherRows').innerHTML=weatherErr
+      ? `<tr><td colspan="5" class="bad">${esc(weatherErr)}</td></tr>`
+      : ((w.rows||[]).length?(w.rows||[]).slice(0,8).map(x=>`<tr><td>${x.date.slice(0,4)}-${x.date.slice(4,6)}-${x.date.slice(6,8)} ${x.time.slice(0,2)}:${x.time.slice(2,4)}</td><td>${esc(x.POP||'-')}%</td><td>${ptyName(x.PTY)}</td><td>${esc(x.TMP||'-')}℃</td><td>${esc(x.WSD||'-')}m/s</td></tr>`).join(''):'<tr><td colspan="5">예보 데이터 없음</td></tr>');
+
+    $('result').classList.remove('hidden');
+  }catch(e){ log('ERROR: '+e.stack); alert('점검 중 오류: '+e.message+'\\n\\n개발 로그를 확인해 주세요.'); }
+  finally{$('loading').classList.add('hidden');}
+}
+</script>
+</body></html>
