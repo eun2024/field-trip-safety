@@ -26,6 +26,7 @@ table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}th,td{t
 .waypoint-remove{width:38px;height:38px;padding:0;border-radius:9px;background:#667085;font-size:20px;line-height:1}
 .waypoint-add{background:#344054;padding:10px 14px}
 .waypoint-meta{font-size:12px;color:#667085;margin-top:4px}
+.addr-field{position:relative}.addr-suggestions{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:100;background:#fff;border:1px solid #d0d5dd;border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.14);max-height:280px;overflow:auto;display:none}.addr-suggestions.show{display:block}.addr-item{padding:10px 12px;border-bottom:1px solid #eef2f6;cursor:pointer}.addr-item:hover{background:#f2f6ff}.addr-main{font-size:14px;font-weight:700}.addr-sub,.addr-note{font-size:12px;color:#667085;margin-top:3px}.addr-note{padding:10px 12px}.addr-selected{border-color:#7f9cf5!important;background:#f8fbff!important}
 @media(max-width:760px){.grid,.grid3,.status{grid-template-columns:1fr}.hero{display:block}.badge{display:inline-block;margin-top:8px}}
 </style>
 </head>
@@ -45,7 +46,7 @@ table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}th,td{t
   <div class="card">
     <div class="grid">
       <div><label>출발지</label><input id="origin" value="경상남도 진주시 칠암동 414-4" readonly></div>
-      <div><label>도착지</label><input id="destination" placeholder="예: 거창군 거창읍 상림리 64-1"></div>
+      <div><label>도착지</label><div class="addr-field"><input id="destination" autocomplete="off" placeholder="예: 상림리 64-1 또는 연산동 213-20"><div id="destination_suggestions" class="addr-suggestions"></div></div></div>
     </div>
 
     <div style="margin-top:12px">
@@ -60,7 +61,7 @@ table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}th,td{t
       <div class="hint">출발시간만 입력하면 경로 소요시간을 이용해 경유지·도착지의 예상 통과시각을 자동 계산합니다.</div>
     </div>
     <div style="margin-top:12px"><button class="full" onclick="runCheck()">위험점검 실행</button></div>
-    <div class="hint">도착지는 <b>시·군 + 읍·면·동 + 상세주소</b>까지 입력해 주세요. 경유지는 <b>선택사항</b>이며, 입력하지 않으면 자동으로 건너뜁니다. 경유지는 <b>＋ 경유지 추가</b>로 최대 5개까지 추가하고, 각 줄의 <b>−</b> 버튼으로 삭제할 수 있습니다. 예: <b>산청군 산청읍 옥산리 465-3</b>. 경상남도는 자동으로 붙입니다. 검색결과는 입력한 <b>시·군·읍면·리·지번</b>과 일치하는지 다시 검증하며, 일치하지 않으면 점검을 진행하지 않습니다. 출발지는 경상남도 진주시 칠암동 414-4로 고정했습니다.</div>
+    <div class="hint">도착지·경유지는 <b>리/동 + 지번</b>만 입력해도 자동검색합니다. 예: <b>상림리 64-1</b>, <b>연산동 213-20</b>. 후보가 1곳이면 자동 선택하고, 여러 곳이면 아래 목록에서 정확한 주소를 선택해 주세요. 시·군·구를 함께 입력하면 더 정확합니다.</div>
   </div>
 
   <div id="loading" class="card hidden">데이터 확인 중...</div>
@@ -141,24 +142,22 @@ table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}th,td{t
 <script>
 const $=id=>document.getElementById(id);
 let waypointSeq=0;
+const selectedAddressById=new Map(), autocompleteTimers=new Map();
 function addWaypoint(value=''){
   const list=$('waypointList');
-  if(list.querySelectorAll('.waypoint-row').length>=5){
-    alert('경유지는 최대 5개까지 추가할 수 있습니다.');
-    return;
-  }
-  waypointSeq++;
-  const row=document.createElement('div');
+  if(list.querySelectorAll('.waypoint-row').length>=5){alert('경유지는 최대 5개까지 추가할 수 있습니다.');return;}
+  waypointSeq++; const id=`waypoint_${waypointSeq}`, row=document.createElement('div');
   row.className='waypoint-row';
-  row.innerHTML=`<input class="waypoint-input" id="waypoint_${waypointSeq}" value="${esc(value)}" placeholder="예: 산청군 산청읍 옥산리 465-3">
-  <button type="button" class="waypoint-remove" title="경유지 삭제" onclick="this.parentElement.remove()">−</button>`;
-  list.appendChild(row);
+  row.innerHTML=`<div class="addr-field" style="flex:1"><input class="waypoint-input" id="${id}" value="${esc(value)}" autocomplete="off" placeholder="예: 상림리 64-1"><div id="${id}_suggestions" class="addr-suggestions"></div></div><button type="button" class="waypoint-remove" title="경유지 삭제" onclick="selectedAddressById.delete('${id}');this.parentElement.remove()">−</button>`;
+  list.appendChild(row); setupAddressAutocomplete($(id));
 }
 function waypointValues(){
   return [...document.querySelectorAll('.waypoint-input')]
     .map(x=>(x.value||'').trim())
     .filter(v=>v.length>0);
 }
+function waypointInputs(){return [...document.querySelectorAll('.waypoint-input')].filter(x=>(x.value||'').trim().length>0);}
+
 function normalizeServiceKey(k){
   let s=(k||'').trim();
   // 공공데이터포털의 Encoding/Decoding 키 어느 쪽을 붙여넣어도 동작하도록 정규화
@@ -198,150 +197,63 @@ async function jfetch(url, opt={}){
   catch(e){ throw new Error('JSON 파싱 실패 / 응답: '+raw.slice(0,500)); }
 }
 function addressCandidates(addr){
-  const a=addr.trim().replace(/\s+/g,' ');
-  const out=[a];
-  if(!/^경상남도\s/.test(a)) out.unshift('경상남도 '+a);
+  const a=addr.trim().replace(/\s+/g,' '),out=[a];
+  const top=/(특별시|광역시|특별자치시|특별자치도|도)(?:\s|$)/.test(a)||/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:\s|$)/.test(a);
+  if(!top) out.push('경상남도 '+a);
   return [...new Set(out)];
 }
-async function kakaoAddressSearch(q,key){
-  const u='https://dapi.kakao.com/v2/local/search/address.json?size=10&query='+encodeURIComponent(q);
-  return await jfetch(u,{headers:{Authorization:'KakaoAK '+key}});
+async function kakaoAddressSearch(q,key){return await jfetch('https://dapi.kakao.com/v2/local/search/address.json?size=30&query='+encodeURIComponent(q),{headers:{Authorization:'KakaoAK '+key}});}
+async function kakaoKeywordSearch(q,key){return await jfetch('https://dapi.kakao.com/v2/local/search/keyword.json?size=15&query='+encodeURIComponent(q),{headers:{Authorization:'KakaoAK '+key}});}
+function normalizeFullAddress(d,q){return d.address?.address_name||d.road_address?.address_name||d.address_name||d.road_address_name||q;}
+function pointFromDoc(d,q,method){const display=normalizeFullAddress(d,q);return{x:+d.x,y:+d.y,display,matched:display,method,road:d.road_address?.address_name||d.road_address_name||'',place:d.place_name||''};}
+function addrScore(p,raw){
+  const c=s=>String(s||'').replace(/\s+/g,'').replace(/[()]/g,'');
+  const full=c([p.display,p.road,p.place].filter(Boolean).join(' '));let score=0;
+  for(const x of String(raw).trim().split(/\s+/).filter(Boolean))if(full.includes(c(x)))score+=20;
+  const lot=(String(raw).match(/(?:^|\s)(산\s*)?(\d+(?:-\d+)?)(?=\s|$)/)||[])[0]?.trim()||'';
+  if(lot&&full.includes(c(lot)))score+=60;if(c(p.display).includes(c(raw)))score+=100;return score;
 }
-async function kakaoKeywordSearch(q,key){
-  const u='https://dapi.kakao.com/v2/local/search/keyword.json?size=15&query='+encodeURIComponent(q);
-  return await jfetch(u,{headers:{Authorization:'KakaoAK '+key}});
+async function searchAddressOptions(raw,key){
+  const q0=String(raw||'').trim().replace(/\s+/g,' ');if(q0.length<2)return[];
+  const found=[],seen=new Set();
+  const add=(docs,q,m)=>{for(const d of docs||[]){if(!Number.isFinite(+d.x)||!Number.isFinite(+d.y))continue;const p=pointFromDoc(d,q,m),sig=`${p.x.toFixed(6)},${p.y.toFixed(6)}`;if(!seen.has(sig)){seen.add(sig);found.push(p);}}};
+  for(const q of addressCandidates(q0)){try{add((await kakaoAddressSearch(q,key)).documents,q,'주소검색');}catch(e){log(`주소검색 실패(${q}): ${e.message}`);}}
+  if(found.length<2)for(const q of addressCandidates(q0)){try{add((await kakaoKeywordSearch(q,key)).documents,q,'키워드검색');}catch(e){log(`키워드검색 실패(${q}): ${e.message}`);}}
+  return found.map(p=>({...p,_score:addrScore(p,q0)})).sort((a,b)=>b._score-a._score).slice(0,10);
 }
-function normalizeFullAddress(d,q){
-  return d.road_address?.address_name ||
-         d.address?.address_name ||
-         d.road_address_name ||
-         d.address_name ||
-         q;
+function addrBox(input){return $(input.id+'_suggestions');}
+function hideAddr(input){const b=addrBox(input);if(b){b.classList.remove('show');b.innerHTML='';}}
+function chooseAddr(input,p){selectedAddressById.set(input.id,p);input.value=p.display;input.classList.add('addr-selected');hideAddr(input);}
+function renderAddr(input,items,msg=''){
+  const b=addrBox(input);if(!b)return;
+  if(msg){b.innerHTML=`<div class="addr-note">${esc(msg)}</div>`;b.classList.add('show');return;}
+  if(!items.length){b.innerHTML='<div class="addr-note">주소 후보가 없습니다. 시·군·구를 함께 입력해 주세요.</div>';b.classList.add('show');return;}
+  b.innerHTML=items.map((p,i)=>`<div class="addr-item" data-i="${i}"><div class="addr-main">${esc(p.display)}</div>${p.road&&p.road!==p.display?`<div class="addr-sub">도로명 ${esc(p.road)}</div>`:''}${p.place?`<div class="addr-sub">${esc(p.place)}</div>`:''}</div>`).join('');
+  [...b.querySelectorAll('.addr-item')].forEach(el=>el.addEventListener('mousedown',ev=>{ev.preventDefault();chooseAddr(input,items[+el.dataset.i]);}));b.classList.add('show');
 }
-function parsedInputAddress(raw){
-  const s=raw.trim().replace(/\s+/g,' ');
-  const sigungu=(s.match(/([가-힣]+(?:시|군|구))(?=\s|$)/)||[])[1]||'';
-  const eupmyeon=(s.match(/([가-힣]+(?:읍|면|동))(?=\s|$)/)||[])[1]||'';
-  const ri=(s.match(/([가-힣]+리)(?=\s|$)/)||[])[1]||'';
-  const lot=(s.match(/(?:^|\s)(산\s*)?(\d+(?:-\d+)?)(?=\s|$)/)||[])[0]?.trim()||'';
-  return {sigungu,eupmyeon,ri,lot};
+async function refreshAddr(input){
+  const raw=input.value.trim();selectedAddressById.delete(input.id);input.classList.remove('addr-selected');
+  if(raw.length<2){hideAddr(input);return;}renderAddr(input,[],'주소 검색 중...');
+  try{renderAddr(input,await searchAddressOptions(raw,'__SERVER__'));}catch(e){renderAddr(input,[],`주소검색 오류: ${e.message}`);}
 }
-function hasRequiredLocality(raw){
-  const p=parsedInputAddress(raw);
-  return !!(p.sigungu && (p.eupmyeon||p.ri) && p.lot);
-}
-function candidateText(d,q){
-  return [
-    d.address_name||'',
-    d.road_address_name||'',
-    d.address?.address_name||'',
-    d.road_address?.address_name||'',
-    d.place_name||'',
-    q||''
-  ].join(' ').replace(/\s+/g,' ');
-}
-function addressMatchScore(d,raw,q){
-  const p=parsedInputAddress(raw);
-  const c=candidateText(d,q).replace(/\s+/g,' ').trim();
-  const compact=s=>String(s||'').replace(/\s+/g,'').replace(/^경상남도|^경남/,'');
-  const cc=compact(c);
-
-  // 시·군은 입력했다면 반드시 일치해야 한다.
-  if(p.sigungu && !cc.includes(compact(p.sigungu))) return -999;
-
-  // 읍·면·동/리는 입력했다면 후보 주소에 존재해야 한다.
-  // 카카오의 도로명 결과에서 법정동이 별도 필드로 오는 경우도 함께 확인한다.
-  const region3 = d?.address?.region_3depth_name || '';
-  const region3h = d?.road_address?.region_3depth_name || '';
-  if(p.eupmyeon){
-    const loc=compact(p.eupmyeon);
-    if(!cc.includes(loc) && !compact(region3).includes(loc) && !compact(region3h).includes(loc)) return -999;
-  }
-  if(p.ri){
-    const loc=compact(p.ri);
-    if(!cc.includes(loc) && !compact(region3).includes(loc) && !compact(region3h).includes(loc)) return -999;
-  }
-
-  let score=0;
-  if(p.sigungu) score+=60;
-  if(p.eupmyeon) score+=35;
-  if(p.ri) score+=35;
-
-  // 상세 지번/도로번호는 완전 문자열보다 카카오 주소 필드의 번호를 우선 비교한다.
-  const nums=(String(raw).match(/\d+(?:-\d+)?/g)||[]);
-  if(nums.length){
-    const candNums=(c.match(/\d+(?:-\d+)?/g)||[]);
-    if(nums.some(n=>candNums.includes(n))) score+=55;
-    else score-=20;
-  }
-
-  if(/경상남도|경남/.test(c)) score+=10;
-  return score;
-}
-function chooseBestAddress(docs,raw,q){
-  const ranked=(docs||[])
-    .map(d=>({d,score:addressMatchScore(d,raw,q)}))
-    .filter(x=>x.score>=45)
-    .sort((a,b)=>b.score-a.score);
-  return ranked.length?ranked[0].d:null;
+function setupAddressAutocomplete(input){
+  if(!input||input.dataset.auto==='1')return;input.dataset.auto='1';
+  input.addEventListener('input',()=>{selectedAddressById.delete(input.id);input.classList.remove('addr-selected');clearTimeout(autocompleteTimers.get(input.id));autocompleteTimers.set(input.id,setTimeout(()=>refreshAddr(input),350));});
+  input.addEventListener('focus',()=>{if(input.value.trim().length>=2&&!selectedAddressById.has(input.id))refreshAddr(input);});
+  input.addEventListener('blur',()=>setTimeout(()=>hideAddr(input),180));
 }
 async function geocode(addr,key){
-  const raw=addr.trim().replace(/\s+/g,' ');
-  if(!hasRequiredLocality(raw)){
-    throw new Error('주소는 시·군 + 읍·면·동(또는 리) + 지번까지 입력해 주세요. 예: 산청군 산청읍 옥산리 465-2');
-  }
-  const tried=[];
-
-  // 1) 정확 주소검색
-  for(const q of addressCandidates(raw)){
-    tried.push('주소:'+q);
-    try{
-      const j=await kakaoAddressSearch(q,key);
-      const d=chooseBestAddress(j.documents,raw,q);
-      if(d){
-        const full=normalizeFullAddress(d,q);
-        return {x:+d.x,y:+d.y,display:full,matched:full,method:'주소확인'};
-      }
-    }catch(e){ log('주소검색 실패('+q+'): '+e.message); }
-  }
-
-  // 2) 지번 토큰을 분리한 주소검색 재시도
-  const p=parsedInputAddress(raw);
-  const relaxed=[
-    `경상남도 ${p.sigungu} ${p.eupmyeon} ${p.ri} ${p.lot}`.replace(/\s+/g,' ').trim(),
-    `${p.sigungu} ${p.eupmyeon} ${p.ri} ${p.lot}`.replace(/\s+/g,' ').trim(),
-    `${p.sigungu} ${p.ri} ${p.lot}`.replace(/\s+/g,' ').trim()
-  ];
-  for(const q of [...new Set(relaxed)]){
-    tried.push('재검색:'+q);
-    try{
-      const j=await kakaoAddressSearch(q,key);
-      const d=chooseBestAddress(j.documents,raw,q);
-      if(d){
-        const full=normalizeFullAddress(d,q);
-        return {x:+d.x,y:+d.y,display:full,matched:full,method:'주소 재확인'};
-      }
-    }catch(e){ log('주소 재검색 실패('+q+'): '+e.message); }
-  }
-
-  // 3) 키워드검색(시설명/관공서 등으로 등록된 지번 보완)
-  for(const q of addressCandidates(raw)){
-    tried.push('키워드:'+q);
-    try{
-      const j=await kakaoKeywordSearch(q,key);
-      const d=chooseBestAddress(j.documents,raw,q);
-      if(d){
-        const full=normalizeFullAddress(d,q);
-        return {x:+d.x,y:+d.y,display:full,matched:full,method:'키워드 주소확인'};
-      }
-    }catch(e){ log('키워드검색 실패('+q+'): '+e.message); }
-  }
-
-  throw new Error(
-    '입력한 주소와 일치하는 위치를 확인하지 못했습니다: '+raw+
-    '\n입력한 시·군/읍·면/리/지번과 일치하는 결과만 허용했습니다.'+
-    '\n도로명주소나 건물명을 알고 있다면 그것으로 다시 입력해 주세요.'
-  );
+  const raw=String(addr||'').trim();const items=await searchAddressOptions(raw,key);
+  if(!items.length)throw new Error(`주소를 찾지 못했습니다: ${raw}`);
+  return items[0];
+}
+async function geocodeInput(input,key){
+  const selected=selectedAddressById.get(input.id);
+  if(selected&&input.value.trim()===selected.display)return selected;
+  const raw=input.value.trim(),items=await searchAddressOptions(raw,key);
+  if(!items.length){renderAddr(input,[]);throw new Error(`주소를 찾지 못했습니다: ${raw}\n시·군·구를 함께 입력해 주세요.`);}
+  if(items.length===1||(items[0]._score>=items[1]._score+60)){chooseAddr(input,items[0]);return items[0];}
+  renderAddr(input,items);input.focus();throw new Error(`"${raw}" 주소 후보가 여러 곳입니다.\n입력창 아래에서 정확한 주소를 선택한 뒤 다시 실행해 주세요.`);
 }
 async function regionCode(x,y,key){
   const u=`https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x=${x}&y=${y}`;
@@ -811,14 +723,14 @@ async function runCheck(){
   if(!$('origin').value.trim()){alert('출발지 주소를 입력해 주세요.');return;} if(!$('destination').value.trim()){alert('도착지 주소를 입력해 주세요.');return;}
   $('loading').classList.remove('hidden'); $('result').classList.add('hidden'); $('log').textContent='점검 시작';
   try{
-    const o=await geocode($('origin').value.trim(),key), d=await geocode($('destination').value.trim(),key);
+    const o=await geocode($('origin').value.trim(),key), d=await geocodeInput($('destination'),key);
     const wpTexts=waypointValues();
     if(!wpTexts.length) log('경유지 없음: 출발지 → 도착지 직행 경로로 점검합니다.');
     const wps=[];
     for(let i=0;i<wpTexts.length;i++){
-      const wpAddr=(wpTexts[i]||'').trim();
-      if(!wpAddr) continue;
-      const w=await geocode(wpAddr,key);
+      const wpInput=waypointInputs()[i];
+      if(!wpInput||!wpInput.value.trim()) continue;
+      const w=await geocodeInput(wpInput,key);
       wps.push(w);
     }
     const confirmLines=[
@@ -1040,5 +952,6 @@ const reasons=[];
   }catch(e){ log('ERROR: '+e.stack); alert('점검 중 오류: '+e.message+'\n\n개발 로그를 확인해 주세요.'); }
   finally{$('loading').classList.add('hidden');}
 }
+document.addEventListener('DOMContentLoaded',()=>setupAddressAutocomplete($('destination')));
 </script>
 </body></html>
