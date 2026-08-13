@@ -33,8 +33,12 @@ table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}th,td{t
 <div class="wrap">
   <div class="hero">
     <div><h1>현장출장 경로 사전 위험점검</h1><div class="sub">도착지 주소만 입력해 경로·기상·사고위험·실시간 교통상황을 한 화면에서 확인</div></div>
-    <div class="badge">v2.7-ITS</div>
+    <div class="badge">v3.1 직원배포용</div>
   </div>
+  <div class="card" style="padding:12px 16px;background:#f8fafc">
+    <b>직원용</b> · API 설정 없이 바로 사용할 수 있습니다. 도착지와 필요 시 경유지·출발 예정일시만 입력해 주세요.
+  </div>
+
 
   
 
@@ -128,28 +132,10 @@ table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}th,td{t
     • 경로: 카카오모빌리티 자동차 길찾기<br>
     • 기상: 기상청 단기예보<br>
     • 사고위험: 도로교통공단 링크기반 교통사고 위험지역<br>
-    • 현재 사고·공사·통제: 국가교통정보센터(ITS) 돌발상황정보 실시간 연계
+    • 현재 사고·공사·통제: 국가교통정보센터(ITS) 돌발상황정보 실시간 연계<br>    • API 인증정보: 서버(Cloudflare Worker Secret)에서 관리 · 직원 입력 불필요
   </div>
 
-  <div style="margin-top:22px;padding-top:14px;border-top:2px solid #e4e7ec">
-    <div class="hint" style="margin-bottom:8px"><b>관리자 설정 영역</b> · 일반 사용자는 수정하지 마세요.</div>
-<details class="card settings">
-    <summary>관리자용 API 키 설정</summary>
-    <div style="margin:10px 0;padding:10px 12px;border:1px solid #f0c36d;border-radius:10px;background:#fff8e6;font-size:13px;line-height:1.55">
-      <b>⚠ API 키 설정 주의</b><br>
-      API 키는 시스템 연동을 위한 설정값입니다. <b>임의로 수정·삭제하지 마세요.</b><br>
-      정상 작동 중인 경우 변경할 필요가 없습니다.
-    </div>
-    <div class="grid" style="margin-top:14px;grid-template-columns:1fr 1fr 1fr">
-      <div><label>카카오 REST API Key</label><input id="kakaoKey" type="password" placeholder="Kakao Developers REST API Key"></div>
-      <div><label>공공데이터포털 Service Key</label><input id="dataKey" type="password" placeholder="공공데이터포털 인증키"></div>
-      <div><label>ITS 인증키 <span class="pill">발급키 입력</span></label><input id="itsKey" type="password" placeholder="국가교통정보센터(ITS) 인증키"></div>
-    </div>
-    <div class="hint" style="margin-top:8px">사고위험 데이터 연도는 현재연도부터 역순으로 조회해 <b>실제로 제공되는 최신연도</b>를 자동 선택합니다.</div>
-    <div class="hint">카카오 키와 공공데이터포털 키는 현재 기능에 사용됩니다. ITS 인증키는 발급 후 현재 사고·공사·통제 상세 기능에 연결할 예정입니다. 최초 1회 입력하면 이 PC 브라우저(localStorage)에 계속 저장됩니다. 배포용 서비스에서는 API 키를 브라우저에 노출하지 말고 서버에서 호출해야 합니다.</div>
-    <button class="secondary" style="margin-top:10px" onclick="saveKeys()">키 저장</button>
-  </details>
-  </div>
+  
 </div>
 
 <script>
@@ -182,22 +168,34 @@ function normalizeServiceKey(k){
   return s;
 }
 function keyParam(k){ return encodeURIComponent(normalizeServiceKey(k)); }
-function log(s){ $('log').textContent += "\\n"+s; $('log').scrollTop=$('log').scrollHeight; }
-function saveKeys(){ localStorage.kakaoKey=$('kakaoKey').value.trim(); localStorage.dataKey=$('dataKey').value.trim(); localStorage.itsKey=$('itsKey').value.trim(); alert('이 PC 브라우저에 저장했습니다.'); }
-(function(){ $('kakaoKey').value=localStorage.kakaoKey||''; $('dataKey').value=localStorage.dataKey||''; $('itsKey').value=localStorage.itsKey||''; })();
+function log(s){ $('log').textContent += "\n"+s; $('log').scrollTop=$('log').scrollHeight; }
+// 직원배포용 API 게이트웨이
+// Cloudflare Worker 배포 후 아래 주소 한 줄만 실제 workers.dev 주소로 변경하세요.
+const API_PROXY_BASE = 'https://field-trip-safety-api.lme24.workers.dev';
+
+function proxyUrl(targetUrl){
+  if(API_PROXY_BASE.includes('YOUR-WORKER-SUBDOMAIN')){
+    throw new Error('관리자 설정이 완료되지 않았습니다. Cloudflare Worker 주소를 index.html의 API_PROXY_BASE에 등록해 주세요.');
+  }
+  return API_PROXY_BASE.replace(/\/$/,'') + '/proxy?url=' + encodeURIComponent(targetUrl);
+}
 
 async function jfetch(url, opt={}){
-  const r=await fetch(url,opt);
+  let fetchUrl=url, fetchOpt=opt;
+  if(/^https?:\/\//i.test(url)){
+    fetchUrl=proxyUrl(url);
+    // API 인증 헤더/키는 Worker에서 서버측 Secret으로 주입합니다.
+    fetchOpt={method:'GET',headers:{'Accept':'application/json'}};
+  }
+  const r=await fetch(fetchUrl,fetchOpt);
   const raw=await r.text();
   if(!r.ok){
     let detail=raw.replace(/\s+/g,' ').trim();
-    if(detail.length>500) detail=detail.slice(0,500)+'...';
+    if(detail.length>700) detail=detail.slice(0,700)+'...';
     throw new Error(`${r.status} ${r.statusText}${detail ? ' / 응답: '+detail : ''}`);
   }
   try{return JSON.parse(raw);}
-  catch(e){
-    throw new Error('JSON 파싱 실패 / 응답: '+raw.slice(0,500));
-  }
+  catch(e){ throw new Error('JSON 파싱 실패 / 응답: '+raw.slice(0,500)); }
 }
 function addressCandidates(addr){
   const a=addr.trim().replace(/\s+/g,' ');
@@ -244,19 +242,46 @@ function candidateText(d,q){
 }
 function addressMatchScore(d,raw,q){
   const p=parsedInputAddress(raw);
-  const s=candidateText(d,q);
+  const c=candidateText(d,q).replace(/\s+/g,' ').trim();
+  const compact=s=>String(s||'').replace(/\s+/g,'').replace(/^경상남도|^경남/,'');
+  const cc=compact(c);
+
+  // 시·군은 입력했다면 반드시 일치해야 한다.
+  if(p.sigung && !cc.includes(compact(p.sigung))) return -999;
+
+  // 읍·면·동/리는 입력했다면 후보 주소에 존재해야 한다.
+  // 카카오의 도로명 결과에서 법정동이 별도 필드로 오는 경우도 함께 확인한다.
+  const region3 = d?.address?.region_3depth_name || '';
+  const region3h = d?.road_address?.region_3depth_name || '';
+  if(p.eupmyeon){
+    const loc=compact(p.eupmyeon);
+    if(!cc.includes(loc) && !compact(region3).includes(loc) && !compact(region3h).includes(loc)) return -999;
+  }
+  if(p.ri){
+    const loc=compact(p.ri);
+    if(!cc.includes(loc) && !compact(region3).includes(loc) && !compact(region3h).includes(loc)) return -999;
+  }
+
   let score=0;
-  if(p.sigungu && s.includes(p.sigungu)) score+=50; else return -999;
-  if(p.eupmyeon && s.includes(p.eupmyeon)) score+=30;
-  if(p.ri && s.includes(p.ri)) score+=30;
-  if(p.lot && s.replace(/\s+/g,'').includes(p.lot.replace(/\s+/g,''))) score+=50;
-  if(/경상남도|경남/.test(s)) score+=10;
+  if(p.sigung) score+=60;
+  if(p.eupmyeon) score+=35;
+  if(p.ri) score+=35;
+
+  // 상세 지번/도로번호는 완전 문자열보다 카카오 주소 필드의 번호를 우선 비교한다.
+  const nums=(String(raw).match(/\d+(?:-\d+)?/g)||[]);
+  if(nums.length){
+    const candNums=(c.match(/\d+(?:-\d+)?/g)||[]);
+    if(nums.some(n=>candNums.includes(n))) score+=55;
+    else score-=20;
+  }
+
+  if(/경상남도|경남/.test(c)) score+=10;
   return score;
 }
 function chooseBestAddress(docs,raw,q){
   const ranked=(docs||[])
     .map(d=>({d,score:addressMatchScore(d,raw,q)}))
-    .filter(x=>x.score>=50)
+    .filter(x=>x.score>=45)
     .sort((a,b)=>b.score-a.score);
   return ranked.length?ranked[0].d:null;
 }
@@ -314,8 +339,8 @@ async function geocode(addr,key){
 
   throw new Error(
     '입력한 주소와 일치하는 위치를 확인하지 못했습니다: '+raw+
-    '\\n입력한 시·군/읍·면/리/지번과 일치하는 결과만 허용했습니다.'+
-    '\\n도로명주소나 건물명을 알고 있다면 그것으로 다시 입력해 주세요.'
+    '\n입력한 시·군/읍·면/리/지번과 일치하는 결과만 허용했습니다.'+
+    '\n도로명주소나 건물명을 알고 있다면 그것으로 다시 입력해 주세요.'
   );
 }
 async function regionCode(x,y,key){
@@ -763,10 +788,10 @@ function fmtDistance(m){
   return m<1000?`${Math.round(m)}m`:`${(m/1000).toFixed(1)}km`;
 }
 async function runCheck(){
-  const key=$('kakaoKey').value.trim(), dataKey=$('dataKey').value.trim();
-  if(!key||!dataKey){alert('카카오 REST API Key와 공공데이터포털 Service Key를 입력해 주세요.');return;}
+  // 실제 API 키는 브라우저가 아니라 Cloudflare Worker Secret에 저장됩니다.
+  const key='__SERVER__', dataKey='__SERVER__';
   if(!$('origin').value.trim()){alert('출발지 주소를 입력해 주세요.');return;} if(!$('destination').value.trim()){alert('도착지 주소를 입력해 주세요.');return;}
-  saveKeys(); $('loading').classList.remove('hidden'); $('result').classList.add('hidden'); $('log').textContent='점검 시작';
+  $('loading').classList.remove('hidden'); $('result').classList.add('hidden'); $('log').textContent='점검 시작';
   try{
     const o=await geocode($('origin').value.trim(),key), d=await geocode($('destination').value.trim(),key);
     const wpTexts=waypointValues();
@@ -796,7 +821,7 @@ async function runCheck(){
     log(`경로 완료: ${(rt.summary.distance/1000).toFixed(1)} km / 경로점 ${pts.length}개`);
 
     let itsAll=[], itsNear=[], itsErr=null;
-    const itsKey=$('itsKey').value.trim();
+    const itsKey='__SERVER__';
     if(itsKey){
       try{
         const bounds=routeBounds(pts,0.08);
@@ -909,9 +934,9 @@ const reasons=[];
     const itsNow=dtText(new Date());
     $('itsUpdated').textContent=itsNow;
     if(!itsKey){
-      $('itsStatus').innerHTML='<span class="warn"><b>ITS 인증키를 입력하면 현재 사고·공사·통제정보를 조회합니다.</b></span>';
+      $('itsStatus').innerHTML='<span class="warn"><b>ITS 실시간 교통정보 연동 상태를 확인 중입니다.</b></span>';
       $('itsNearCount').textContent='-'; $('itsTopRisk').textContent='-';
-      $('itsRows').innerHTML='<tr><td colspan="5">API 설정에서 ITS 인증키를 입력하고 저장해 주세요.</td></tr>';
+      $('itsRows').innerHTML='<tr><td colspan="5">관리자에게 ITS 연동 상태를 확인해 주세요.</td></tr>';
       
     }else if(itsErr){
       $('itsStatus').innerHTML=`<span class="bad"><b>ITS 조회 실패:</b> ${esc(itsErr)}</span>`;
@@ -994,7 +1019,7 @@ const reasons=[];
     }).join('');
 
     $('result').classList.remove('hidden');
-  }catch(e){ log('ERROR: '+e.stack); alert('점검 중 오류: '+e.message+'\\n\\n개발 로그를 확인해 주세요.'); }
+  }catch(e){ log('ERROR: '+e.stack); alert('점검 중 오류: '+e.message+'\n\n개발 로그를 확인해 주세요.'); }
   finally{$('loading').classList.add('hidden');}
 }
 </script>
