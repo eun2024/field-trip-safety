@@ -247,7 +247,7 @@ function addressMatchScore(d,raw,q){
   const cc=compact(c);
 
   // 시·군은 입력했다면 반드시 일치해야 한다.
-  if(p.sigung && !cc.includes(compact(p.sigung))) return -999;
+  if(p.sigungu && !cc.includes(compact(p.sigungu))) return -999;
 
   // 읍·면·동/리는 입력했다면 후보 주소에 존재해야 한다.
   // 카카오의 도로명 결과에서 법정동이 별도 필드로 오는 경우도 함께 확인한다.
@@ -263,7 +263,7 @@ function addressMatchScore(d,raw,q){
   }
 
   let score=0;
-  if(p.sigung) score+=60;
+  if(p.sigungu) score+=60;
   if(p.eupmyeon) score+=35;
   if(p.ri) score+=35;
 
@@ -677,19 +677,37 @@ function haversine(a,b){
   return 2*R*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));
 }
 async function itsEventInfo(apiKey,bounds){
-  if(!apiKey) throw new Error('ITS 인증키가 입력되지 않았습니다.');
-  const url='https://openapi.its.go.kr:9443/eventInfo?'
+  // ITS 인증키는 브라우저에 두지 않고 Cloudflare Worker Secret에서 사용합니다.
+  const url=API_PROXY_BASE.replace(/\/$/,'') + '/its-events?'
     +new URLSearchParams({
-      apiKey:apiKey.trim(),
-      type:'all',
-      eventType:'all',
       minX:String(bounds.minX),
       maxX:String(bounds.maxX),
       minY:String(bounds.minY),
-      maxY:String(bounds.maxY),
-      getType:'json'
+      maxY:String(bounds.maxY)
     }).toString();
-  return await jfetch(url);
+
+  const r=await fetch(url,{
+    method:'GET',
+    headers:{'Accept':'application/json'}
+  });
+  const raw=await r.text();
+
+  if(!r.ok){
+    let detail=raw.replace(/\s+/g,' ').trim();
+    if(detail.length>700) detail=detail.slice(0,700)+'...';
+    throw new Error(`${r.status} ${r.statusText}${detail ? ' / 응답: '+detail : ''}`);
+  }
+
+  let data;
+  try{ data=JSON.parse(raw); }
+  catch(e){ throw new Error('ITS JSON 파싱 실패 / 응답: '+raw.slice(0,500)); }
+
+  // Worker가 522/5xx를 최대 3회 재시도한 뒤 일시 장애 상태를 반환한 경우
+  if(data && data.available===false){
+    throw new Error(data.message || '실시간 교통정보를 일시적으로 조회할 수 없습니다. 잠시 후 다시 조회해 주세요.');
+  }
+
+  return data;
 }
 function extractItsEvents(j){
   const r=j?.response??j;
